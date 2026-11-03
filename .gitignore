@@ -1,0 +1,6 @@
+out/
+samples/
+*.apk
+debug.keystore
+host/rewire
+host/rewire.exe

@@ -75,7 +75,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private boolean mexpOn, mexpBendEach = true;
     private int mexpMode = Ghost.AVERAGE, mexpShots = 2, ghostIdx = 2, screen = PatchView.SCREEN_LCD;
     static final int[] GHOST_ALPHA = { 0, 64, 128, 192 };
-    static final String[] GHOST_NAMES = { "OFF", "25%", "50%", "75%" };
+    static final String[] GHOST_NAMES = { "Off", "25%", "50%", "75%" };
 
     // A sequence part way through. The mode, count and bend setting are latched when it starts, as CHDK_Rewired's
     // mexp_begin() latches them: changing them half way would finish a composite under rules it was not begun with.
@@ -259,7 +259,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 "SCREEN", PatchView.SCREEN_NAMES[screen],
                 "NOW", seq ? "shot " + (seqParts.size() + 1) + " of " + seqTarget : mexpOn ? "shot 1 of " + mexpShots : "-" };
 
-        view.fields[PatchView.ROW_PRESET] = new String[] { "PRESET", presetLabel(), "", "centre: " + presetAction() };
+        view.fields[PatchView.ROW_PRESET] = new String[] { "PRESET", presetLabel(), "CENTRE", presetAction() };
+
+        // One style for every value: sentence case, as the engine's own names already are ("Quarters", "Lock loss").
+        // Labels stay capitals, as captions; abbreviations (LCD, JPG, XOR) are left as they are.
+        for (int r = PatchView.ROW_SCOPE; r < PatchView.ROWS; r++)
+            for (int i = 1; i < view.fields[r].length; i += 2) view.fields[r][i] = cap(view.fields[r][i]);
 
         view.ghost = seq ? view.ghost : null;
         view.ghostAlpha = GHOST_ALPHA[ghostIdx];
@@ -275,14 +280,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     private boolean inSequence() { return !seqParts.isEmpty(); }
 
+    /** the first letter upper case, the rest as it is: "top left" -> "Top left", "(chain full)" -> "(Chain full)" */
+    static String cap(String s) {
+        for (int i = 0; i < s.length(); i++)
+            if (Character.isLetter(s.charAt(i)))
+                return s.substring(0, i) + Character.toUpperCase(s.charAt(i)) + s.substring(i + 1);
+        return s;
+    }
+
     private String hint() {
         switch (view.row) {
-            case PatchView.ROW_MATRIX: return "wheel: patch a source   centre: reroll   trash: straight wire   shutter: shoot";
-            case PatchView.ROW_SCOPE:  return "wheel: change   centre: mutate the matrix a little   trash: reset this region";
-            case PatchView.ROW_CHAIN:  return "wheel: change   centre: lock and start another   trash: drop an effect";
-            case PatchView.ROW_MULTI:  return inSequence() ? "centre / trash: cancel the sequence (shots so far stay on the card)"
-                                                           : "wheel: change   BEND: bend each shot, or only the blended result";
-            default:                   return "wheel: choose   centre: " + presetAction();
+            case PatchView.ROW_MATRIX: return "Wheel: patch a source   Centre: reroll   Trash: straight wire   Shutter: shoot";
+            case PatchView.ROW_SCOPE:  return "Wheel: change   Centre: mutate the matrix a little   Trash: reset this region";
+            case PatchView.ROW_CHAIN:  return "Wheel: change   Centre: lock and start another   Trash: drop an effect";
+            case PatchView.ROW_MULTI:  return inSequence() ? "Centre / Trash: cancel the sequence (shots so far stay on the card)"
+                                                           : "Wheel: change   Bend: bend each shot, or only the blended result";
+            default:                   return "Wheel: choose   Centre: " + presetAction();
         }
     }
 
@@ -654,7 +667,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         log("review " + (bm == null ? "not shown (decode failed)" : "shown " + bm.getWidth() + "x" + bm.getHeight()));
         view.review = bm;
         view.reviewCaption = (kind == SHOT_LAST ? shots + " exposures, " + Ghost.MODE_NAMES[seqMode] + ": " : "")
-                + Card.OUT_DIR + "/" + base + (saveArw ? ".JPG + .ARW" : ".JPG") + "   centre / MENU / shutter: back";
+                + Card.OUT_DIR + "/" + base + (saveArw ? ".JPG + .ARW" : ".JPG") + "   Centre / MENU / Shutter: back";
         status("");
         refresh();
     }

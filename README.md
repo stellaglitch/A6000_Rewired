@@ -1,16 +1,16 @@
-# Soft Bending For The α6000
+# Soft Bending For The Î±6000
 
-[CHDK_Rewired](https://github.com/lr-m/CHDK_Rewired)'s circuit bending, made as an app for the Sony α6000.
+[CHDK_Rewired](https://github.com/lr-m/CHDK_Rewired)'s circuit bending, made as an app for the Sony Î±6000.
 
 On a PowerShot, CHDK_Rewired rewires the sensor's data bus inside the camera's capture path, before Canon develops the picture. The a6000's imaging pipeline cannot be patched that way. What a PlayMemories app can do is read the raw the camera has just written. So this app runs CHDK_Rewired's own bend engine (`bend.c` and `bendx.c`, unchanged) one step later, on the ARW's sensor data:
 
 ```
-shutter ─► camera writes DCIM/100MSDCF/DSC01542.ARW (untouched)
-              │
-              ▼  cRAW decoded to 12-bit linear, into a PowerShot-layout raw buffer
-          bend matrix, per segment  ─►  experimental chain (Melt, DMA stride, Lock loss, JPEG bus ...)
-              │
-              ▼
+shutter â”€â–º camera writes DCIM/100MSDCF/DSC01542.ARW (untouched)
+              â”‚
+              â–¼  cRAW decoded to 12-bit linear, into a PowerShot-layout raw buffer
+          bend matrix, per segment  â”€â–º  experimental chain (Melt, DMA stride, Lock loss, JPEG bus ...)
+              â”‚
+              â–¼
           REWIRED/RW01542.ARW   the bent raw, re-encoded in place: opens in any raw developer
           REWIRED/RW01542.JPG   developed in the camera, tagged with its recipe
           REWIRED/RW01542.BND   the recipe, the same record CHDK_Rewired writes
@@ -27,8 +27,8 @@ Use **RAW+JPEG**. Never use RAW alone: on the a6000 a shutter fired from an app 
 | up / down | row: **matrix**, **scope**, **chain**, **multi**, **preset** |
 | left / right | field in the row (on the matrix, the output bit) |
 | wheel / dial | change the field (on the matrix, patch a source into the bit) |
-| centre | matrix: reroll · scope: mutate · chain: lock this effect and start another · multi: cancel the sequence · preset: load or save |
-| trash | matrix: straight wire · scope: reset the region's matrix · chain: drop an effect · multi: cancel the sequence |
+| centre | matrix: reroll Â· scope: mutate Â· chain: lock this effect and start another Â· multi: cancel the sequence Â· preset: load or save |
+| trash | matrix: straight wire Â· scope: reset the region's matrix Â· chain: drop an effect Â· multi: cancel the sequence |
 | Fn | hide or show the panel |
 | shutter | shoot, then bend. A bar shows progress, then the bent picture appears. Centre, MENU or a half-press returns |
 | MENU | leave |
@@ -42,14 +42,14 @@ This is CHDK_Rewired's double exposure. Two to nine shots are blended into one p
 | field | |
 |---|---|
 | MULTI | on / off. Turning it off during a sequence cancels the sequence |
-| BLEND | **ADD** sums the light, so highlights build up and clip. **LIGHTEN** keeps the brighter pixel (lights on black). **DARKEN** keeps the darker one. **AVERAGE** is the classic ghost |
-| SHOTS | 2–9 |
+| BLEND | **Add** sums the light, so highlights build up and clip. **Lighten** keeps the brighter pixel (lights on black). **Darken** keeps the darker one. **Average** is the classic ghost |
+| SHOTS | 2â€“9 |
 | BEND | **each**: every shot is bent as it is taken, then the bent shots are blended. **composite**: the shots are blended first and the blend is bent once |
-| GHOST | how strongly the shots so far show over the live view: OFF, 25%, 50%, 75% |
-| SCREEN | **LCD** or **EVF**, whichever you are looking through. The LCD shows 640×480 pixels on a 16:9 panel, so its pixels are wider than they are tall. The finder is 4:3 with square pixels. This setting keeps the review, the ghost and the menu text at 3:2 on either |
+| GHOST | how strongly the shots so far show over the live view: Off, 25%, 50%, 75% |
+| SCREEN | **LCD** or **EVF**, whichever you are looking through. The LCD shows 640Ã—480 pixels on a 16:9 panel, so its pixels are wider than they are tall. The finder is 4:3 with square pixels. This setting keeps the review, the ghost and the menu text at 3:2 on either |
 | NOW | which shot is next |
 
-The blend uses the raw sensor values, so ADD and AVERAGE behave as they would on film. The ghost is a quick preview built from JPEGs, so it is close to the result but not exact. With BEND *each*, every shot except the last is saved as its own bent picture, and the last shot gives the composite. With BEND *composite*, the shots in between are only the camera's own files in `DCIM`. A sequence uses the BLEND, SHOTS and BEND settings it started with. Changing them during a sequence takes effect from the next one.
+The blend uses the raw sensor values, so Add and Average behave as they would on film. The ghost is a quick preview built from JPEGs, so it is close to the result but not exact. With BEND *each*, every shot except the last is saved as its own bent picture, and the last shot gives the composite. With BEND *composite*, the shots in between are only the camera's own files in `DCIM`. A sequence uses the BLEND, SHOTS and BEND settings it started with. Changing them during a sequence takes effect from the next one.
 
 ## The desktop tool
 

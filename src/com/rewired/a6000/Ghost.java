@@ -17,7 +17,7 @@ final class Ghost {
 
     // the order of RW_MEXP_* in native/mexp.h
     static final int ADD = 0, LIGHTEN = 1, DARKEN = 2, AVERAGE = 3, MODES = 4;
-    static final String[] MODE_NAMES = { "ADD", "LIGHTEN", "DARKEN", "AVERAGE" };
+    static final String[] MODE_NAMES = { "Add", "Lighten", "Darken", "Average" };
 
     private static final int[] TO_LIN = new int[256];          // sRGB 0..255 -> linear 0..4095
     private static final int[] FROM_LIN = new int[4096];       // and back

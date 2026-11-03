@@ -46,7 +46,7 @@ This is CHDK_Rewired's double exposure. Two to nine shots are blended into one p
 | SHOTS | 2–9 |
 | BEND | **each**: every shot is bent as it is taken, then the bent shots are blended. **composite**: the shots are blended first and the blend is bent once |
 | GHOST | how strongly the shots so far show over the live view: OFF, 25%, 50%, 75% |
-| SCREEN | **LCD** or **EVF**, whichever you are looking through. The LCD is 16:9 and the finder 4:3, so the ghost and review are drawn to the right shape for each |
+| SCREEN | **LCD** or **EVF**, whichever you are looking through. The LCD shows 640×480 pixels on a 16:9 panel, so its pixels are wider than they are tall. The finder is 4:3 with square pixels. This setting keeps the review, the ghost and the menu text at 3:2 on either |
 | NOW | which shot is next |
 
 The blend uses the raw sensor values, so ADD and AVERAGE behave as they would on film. The ghost is a quick preview built from JPEGs, so it is close to the result but not exact. With BEND *each*, every shot except the last is saved as its own bent picture, and the last shot gives the composite. With BEND *composite*, the shots in between are only the camera's own files in `DCIM`. A sequence uses the BLEND, SHOTS and BEND settings it started with. Changing them during a sequence takes effect from the next one.

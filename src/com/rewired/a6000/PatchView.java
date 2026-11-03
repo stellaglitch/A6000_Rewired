@@ -64,6 +64,8 @@ public class PatchView extends View {
         float u = u();
         int w = getWidth(), h = getHeight();
         p.setTypeface(Typeface.DEFAULT_BOLD);
+        // Text narrowed by the panel's pixel shape, so it reads at its own proportions on the LCD as on the finder.
+        p.setTextScaleX(1f / pixAspect(w, h));
 
         if (review != null) { drawReview(c, w, h, u); return; }
 
@@ -175,8 +177,11 @@ public class PatchView extends View {
      * Where an iw x ih picture goes in a w x h view so it shows at its own shape on the selected panel: as large as
      * fits, centred. On the 16:9 LCD each of the view's pixels is wider than tall, so the picture is drawn narrower.
      */
+    /** the shown width of one view pixel over its height: 4/3 on the LCD (640x480 on a 16:9 panel), 1 on the finder */
+    private float pixAspect(int w, int h) { return h > 0 ? SCREEN_ASPECT[screen] / (w / (float) h) : 1f; }
+
     private void fit(int iw, int ih, int w, int h, Rect out) {
-        float pixAspect = SCREEN_ASPECT[screen] / (w / (float) h);    // shown width of one view pixel / its height
+        float pixAspect = pixAspect(w, h);
         float imgAspect = iw / (float) ih;
         float dw = h * imgAspect / pixAspect, dh = h;
         if (dw > w) { dw = w; dh = w * pixAspect / imgAspect; }

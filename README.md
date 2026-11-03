@@ -18,7 +18,7 @@ shutter ─► camera writes DCIM/100MSDCF/DSC01542.ARW (untouched)
 
 The values the engine sees are linear sensor values: what an ADC bus carries, and what CHDK bends. Presets move between the two cameras. `BENDnn.BND` files from a PowerShot's `CHDK/BENDS` load here, presets saved here go in `REWIRED/BENDS` in the same format.
 
-## Using it
+## Using The App
 
 Use **RAW+JPEG**. Never use RAW alone: on the a6000 a shutter fired from an app while Quality is RAW alone restarts the camera (Recipe Lab's issue #100, and confirmed here). The app guards against it: before every shot it switches its own shots to RAW+JPEG and refuses to fire unless the camera confirms the change. Your setting comes back when you leave the app. Then open **Rewired** from the Application list.
 

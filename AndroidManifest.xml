@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.rewired.a6000"
-    android:versionCode="103"
-    android:versionName="0.1.3">
+    android:versionCode="200"
+    android:versionName="0.2.0">
     <uses-sdk android:minSdkVersion="10" android:targetSdkVersion="10" />
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- reads the camera's raws, writes REWIRED/ on the memory card -->

@@ -11,6 +11,7 @@
 #include "../native/recipe.h"
 #include "../native/pipeline.h"
 #include "../native/log.h"
+#include "../native/mexp.h"
 
 #define CLS(name) Java_com_rewired_a6000_Native_##name
 
@@ -305,13 +306,16 @@ JNIEXPORT jboolean JNICALL CLS(savePreset)(JNIEnv *env, jclass c, jstring path, 
 static const char *opt(JNIEnv *env, jstring s) { return s ? (*env)->GetStringUTFChars(env, s, 0) : 0; }
 static void rel(JNIEnv *env, jstring s, const char *p) { if (s && p) (*env)->ReleaseStringUTFChars(env, s, p); }
 
-JNIEXPORT jint JNICALL CLS(process)(JNIEnv *env, jclass c, jstring in, jstring outArw, jstring outJpg,
-                                    jstring outBnd, jstring rom, jbyteArray rec, jint seed, jint frame)
+JNIEXPORT jint JNICALL CLS(processMulti)(JNIEnv *env, jclass c, jstring in, jstring outArw, jstring outJpg,
+                                         jstring outBnd, jstring rom, jbyteArray rec, jint seed, jint frame,
+                                         jobjectArray earlier, jint mode, jboolean afterBend)
 {
     rw_recipe_t r;
     rw_job_t job;
-    int rc;
+    jstring js[RW_MEXP_MAX - 1];
+    int rc, i, n = earlier ? (*env)->GetArrayLength(env, earlier) : 0;
 
+    if (n > RW_MEXP_MAX - 1) n = RW_MEXP_MAX - 1;
     get_recipe(env, rec, &r);
     memset(&job, 0, sizeof(job));
     job.in_arw = opt(env, in);
@@ -322,6 +326,14 @@ JNIEXPORT jint JNICALL CLS(process)(JNIEnv *env, jclass c, jstring in, jstring o
     job.jpeg_quality = 92;
     job.seed = (unsigned)seed;
     job.frame = (unsigned)frame;
+    for (i = 0; i < n; i++)
+    {
+        js[i] = (jstring)(*env)->GetObjectArrayElement(env, earlier, i);
+        job.mexp_in[i] = opt(env, js[i]);
+    }
+    job.mexp_n = n;
+    job.mexp_mode = mode;
+    job.mexp_after_bend = afterBend ? 1 : 0;
 
     last_err[0] = 0;
     rc = rw_process(&job, &r, last_err);
@@ -331,7 +343,14 @@ JNIEXPORT jint JNICALL CLS(process)(JNIEnv *env, jclass c, jstring in, jstring o
     rel(env, outJpg, job.out_jpg);
     rel(env, outBnd, job.out_bnd);
     rel(env, rom, job.rom_path);
+    for (i = 0; i < n; i++) rel(env, js[i], job.mexp_in[i]);
     return rc;
+}
+
+JNIEXPORT jint JNICALL CLS(process)(JNIEnv *env, jclass c, jstring in, jstring outArw, jstring outJpg,
+                                    jstring outBnd, jstring rom, jbyteArray rec, jint seed, jint frame)
+{
+    return CLS(processMulti)(env, c, in, outArw, outJpg, outBnd, rom, rec, seed, frame, 0, 0, JNI_FALSE);
 }
 
 // The card log: REWIRED/LOG.TXT. Java writes its own lines through log().

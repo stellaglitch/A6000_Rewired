@@ -4,7 +4,7 @@
 
 CC      ?= gcc
 CFLAGS  ?= -O2 -Wall -Wextra -Wno-unused-parameter -Wno-sign-compare
-SRC     = rewire.c ../native/arw.c ../native/recipe.c ../native/jpegenc.c ../native/pipeline.c ../native/log.c \
+SRC     = rewire.c ../native/arw.c ../native/recipe.c ../native/jpegenc.c ../native/pipeline.c ../native/log.c ../native/mexp.c \
           ../native/engine/bend.c ../native/engine/bendx.c
 SAMPLE  = ../samples/DSC01542.ARW
 OUT     = ../out/host
@@ -26,6 +26,23 @@ test: rewire
 	cmp $(OUT)/ring.ARW $(OUT)/frame.ARW
 	cmp $(OUT)/ring.JPG $(OUT)/frame.JPG
 	@echo "streamed == whole frame"
+	# Multiple exposure. A picture averaged or lightened with itself is itself.
+	./rewire --mexp-selftest
+	./rewire $(SAMPLE) -e $(SAMPLE) -M average -o $(OUT)/mexp-self.ARW -j $(OUT)/mexp-self.JPG -l $(OUT)/test-log.txt
+	cmp $(OUT)/plain.ARW $(OUT)/mexp-self.ARW
+	cmp $(OUT)/plain.JPG $(OUT)/mexp-self.JPG
+	./rewire $(SAMPLE) -e $(SAMPLE) -M lighten -o $(OUT)/mexp-self.ARW
+	cmp $(OUT)/plain.ARW $(OUT)/mexp-self.ARW
+	@echo "average and lighten of a shot with itself == the shot"
+	# Blended before the bend and after it, streamed and whole-frame alike.
+	./rewire $(SAMPLE) -e $(OUT)/random7.ARW -M darken -r 21 -B -d 6 -o $(OUT)/mexp-ring.ARW -j $(OUT)/mexp-ring.JPG
+	./rewire $(SAMPLE) -e $(OUT)/random7.ARW -M darken -r 21 -B -d 6 -o $(OUT)/mexp-frame.ARW -j $(OUT)/mexp-frame.JPG -F
+	cmp $(OUT)/mexp-ring.ARW $(OUT)/mexp-frame.ARW
+	./rewire $(SAMPLE) -e $(OUT)/random7.ARW -M add -A -r 21 -B -d 6 -o $(OUT)/mexp-ring.ARW -j $(OUT)/mexp-post.JPG
+	./rewire $(SAMPLE) -e $(OUT)/random7.ARW -M add -A -r 21 -B -d 6 -o $(OUT)/mexp-frame.ARW -F
+	cmp $(OUT)/mexp-ring.ARW $(OUT)/mexp-frame.ARW
+	./rewire $(SAMPLE) -e $(OUT)/random7.ARW -e $(OUT)/plain.ARW -M lighten -x Melt:0:8 -j $(OUT)/mexp-three.JPG
+	@echo "multiple exposure: streamed == whole frame, before and after the bend"
 
 clean:
 	rm -f rewire rewire.exe

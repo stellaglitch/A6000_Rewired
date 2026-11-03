@@ -19,8 +19,17 @@ import android.view.View;
  * and a few rectangles and lines of text are easier to make legible on its LCD than a widget layout.
  */
 public class PatchView extends View {
-    static final int ROW_MATRIX = 0, ROW_SCOPE = 1, ROW_CHAIN = 2, ROW_PRESET = 3, ROWS = 4;
-    static final String[] ROW_NAMES = { "MATRIX", "SCOPE", "CHAIN", "PRESET" };
+    static final int ROW_MATRIX = 0, ROW_SCOPE = 1, ROW_CHAIN = 2, ROW_MULTI = 3, ROW_PRESET = 4, ROWS = 5;
+    static final String[] ROW_NAMES = { "MATRIX", "SCOPE", "CHAIN", "MULTI", "PRESET" };
+
+    /**
+     * The panel a picture is drawn for. The view is always 640x480-shaped, but the a6000's LCD is a 16:9 panel and its
+     * finder a 4:3 one, so the same 3:2 picture covers a different part of the view on each - the live view does
+     * likewise, and the ghost has to land where the live view is to be any use for lining a shot up.
+     */
+    static final int SCREEN_LCD = 0, SCREEN_EVF = 1;
+    static final String[] SCREEN_NAMES = { "LCD", "EVF" };
+    private static final float[] SCREEN_ASPECT = { 16f / 9f, 4f / 3f };
 
     // the state MainActivity hands over before each invalidate()
     String[] routes = new String[0];
@@ -33,8 +42,12 @@ public class PatchView extends View {
     int progress = -1;                          // 0..1000 while working, -1 otherwise
     Bitmap review;
     String reviewCaption = "";
+    Bitmap ghost;                               // the multiple exposure so far, over the live view
+    int ghostAlpha;                             // 0..255; 0 hides it
+    int screen = SCREEN_LCD;
 
     private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint gp = new Paint(Paint.FILTER_BITMAP_FLAG);
     private final RectF rf = new RectF();
     private final Rect src = new Rect(), dst = new Rect();
 
@@ -54,6 +67,14 @@ public class PatchView extends View {
 
         if (review != null) { drawReview(c, w, h, u); return; }
 
+        // the ghost under everything else, so the panel stays readable over it
+        if (ghost != null && ghostAlpha > 0) {
+            src.set(0, 0, ghost.getWidth(), ghost.getHeight());
+            fit(ghost.getWidth(), ghost.getHeight(), w, h, dst);
+            gp.setAlpha(ghostAlpha);
+            c.drawBitmap(ghost, src, dst, gp);
+        }
+
         // status line at the top, always
         if (status.length() > 0 || progress >= 0) {
             p.setColor(BG);
@@ -70,7 +91,7 @@ public class PatchView extends View {
         }
         if (!panel) return;
 
-        float top = h - 190 * u;
+        float top = h - 220 * u;
         p.setColor(BG);
         c.drawRect(0, top, w, h, p);
 
@@ -150,12 +171,22 @@ public class PatchView extends View {
         }
     }
 
+    /**
+     * Where an iw x ih picture goes in a w x h view so it shows at its own shape on the selected panel: as large as
+     * fits, centred. On the 16:9 LCD each of the view's pixels is wider than tall, so the picture is drawn narrower.
+     */
+    private void fit(int iw, int ih, int w, int h, Rect out) {
+        float pixAspect = SCREEN_ASPECT[screen] / (w / (float) h);    // shown width of one view pixel / its height
+        float imgAspect = iw / (float) ih;
+        float dw = h * imgAspect / pixAspect, dh = h;
+        if (dw > w) { dw = w; dh = w * pixAspect / imgAspect; }
+        out.set((int) ((w - dw) / 2), (int) ((h - dh) / 2), (int) ((w + dw) / 2), (int) ((h + dh) / 2));
+    }
+
     private void drawReview(Canvas c, int w, int h, float u) {
         c.drawColor(Color.BLACK);
         src.set(0, 0, review.getWidth(), review.getHeight());
-        float s = Math.min(w / (float) review.getWidth(), h / (float) review.getHeight());
-        int dw = (int) (review.getWidth() * s), dh = (int) (review.getHeight() * s);
-        dst.set((w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2);
+        fit(review.getWidth(), review.getHeight(), w, h, dst);
         c.drawBitmap(review, src, dst, null);
         p.setColor(BG);
         c.drawRect(0, h - 26 * u, w, h, p);

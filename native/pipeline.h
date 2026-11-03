@@ -30,6 +30,16 @@ typedef struct
     unsigned    seed;           // re-rolls the pattern layouts
     unsigned    frame;          // shot counter, BUS_FRAME and drifting effects
     int         force_frame;    // tests only: hold the whole frame even for a matrix
+
+    // Multiple exposure (mexp.h): the earlier exposures of a sequence, blended
+    // with in_arw, which is the last one and supplies the file's header. With
+    // mexp_after_bend clear they are camera raws, combined before the bend so
+    // the composite is what gets bent; set, they are earlier bent ARWs, and
+    // this shot is bent alone and then laid over them.
+    const char *mexp_in[8];     // RW_MEXP_MAX - 1
+    int         mexp_n;         // 0 = an ordinary single shot
+    int         mexp_mode;      // RW_MEXP_*
+    int         mexp_after_bend;
 } rw_job_t;
 
 // Progress, for a UI polling from another thread. 0..1000.

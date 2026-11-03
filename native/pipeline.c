@@ -30,6 +30,7 @@
 #include "arw.h"
 #include "jpegenc.h"
 #include "log.h"
+#include "mexp.h"
 
 volatile int rw_progress;
 volatile int rw_stage;
@@ -42,7 +43,7 @@ volatile int rw_stage;
 #define IO_BUF          (256 * 1024)    // the card sits behind Sony's FUSE layer: few, large calls
 
 // Where the time goes, for the card log: milliseconds per part of the shot.
-static unsigned long t_read, t_bend, t_arw, t_dev;
+static unsigned long t_read, t_bend, t_arw, t_dev, t_mexp;
 
 //-------------------------------------------------------------------
 // The frame: 12bpp, four pixels in six bytes, the PowerShot layout that
@@ -641,22 +642,41 @@ static int compile_segs(rw_recipe_t *r, seg_cc_t **cc, int n, char *err)
     return 1;
 }
 
+// The earlier exposures laid over a bent row, for a sequence that bends each
+// exposure. Into a row of its own, not the frame: the rows after this one
+// still read the bent row through the line memory and the tap, and must see
+// it as this shot bent it.
+static const unsigned char *mexp_over(rw_mexp_t *mx, const unsigned char *bent, unsigned char *dst,
+                                      unsigned short *tmp, const arw_info_t *a, char *err)
+{
+    unsigned long t = rw_ms();
+    unpack_row(bent, tmp, a->width);
+    if (!rw_mexp_row(mx, tmp, a->width, a->black, a->white, err)) return 0;
+    pack_row(dst, tmp, a->width);
+    t_mexp += rw_ms() - t;
+    return dst;
+}
+
 int rw_process(const rw_job_t *job, const rw_recipe_t *recipe, char *err)
 {
     static arw_info_t a;                    // 12KB of tables; not on the stack
     rw_recipe_t r = *recipe;
     frame_t fr;
     out_t o;
+    rw_mexp_t mx;
     FILE *in = 0;
     seg_cc_t *cc[BEND_SEG_MAX] = { 0, 0, 0, 0 };
-    unsigned char *rowbuf = 0, *origring = 0, *scratch = 0, *jpg_env = 0, *rom_env = 0;
-    unsigned short *codes = 0, *lin = 0;
+    unsigned char *rowbuf = 0, *origring = 0, *scratch = 0, *jpg_env = 0, *rom_env = 0, *overrow = 0;
+    unsigned short *codes = 0, *lin = 0, *overlin = 0;
+    const unsigned char *bent;
+    int pre, post;
     unsigned long jpg_env_len = 0, rom_env_len = 0, t0 = rw_ms();
     unsigned y, x, w, h, ob_x;
     int rc = -1, i, n, nx, framed, steps, step = 0;
 
     memset(&fr, 0, sizeof(fr));
     memset(&o, 0, sizeof(o));
+    memset(&mx, 0, sizeof(mx));
     err[0] = 0;
     rw_progress = 0;
     rw_stage = RW_STAGE_READ;
@@ -674,12 +694,27 @@ int rw_process(const rw_job_t *job, const rw_recipe_t *recipe, char *err)
     in = fopen(job->in_arw, "rb");
     if (!in) { sprintf(err, "cannot open %.200s", job->in_arw); goto done; }
     setvbuf(in, 0, _IOFBF, IO_BUF);
-    t_read = t_bend = t_arw = t_dev = 0;
+    t_read = t_bend = t_arw = t_dev = t_mexp = 0;
     if (arw_open(in, &a, err) != 0) goto done;
     rw_log("arw %s %ux%u, SR2 %s, black %u white %u", a.model, a.width, a.height,
            a.has_sr2 ? "read" : "missing", a.black, a.white);
 
     w = a.width; h = a.height;
+
+    if (job->mexp_n > 0)
+    {
+        rw_log("multiple exposure: %d earlier exposure(s), %s, blended %s the bend", job->mexp_n,
+               rw_mexp_name(job->mexp_mode), job->mexp_after_bend ? "after" : "before");
+        if (!rw_mexp_open(&mx, job->mexp_in, job->mexp_n, job->mexp_mode, &a, err)) goto done;
+        if (job->mexp_after_bend)
+        {
+            overrow = (unsigned char *)malloc(w * 3 / 2);
+            overlin = (unsigned short *)malloc(w * sizeof(unsigned short));
+            if (!overrow || !overlin) { strcpy(err, "not enough memory for the multiple exposure"); goto done; }
+        }
+    }
+    pre  = mx.n && !job->mexp_after_bend;
+    post = mx.n && job->mexp_after_bend;
     // The a6000's strip is 6048 wide for a 6024 picture; the margin on the
     // right is where the optical-black bus is sampled.
     ob_x = w - 8;
@@ -725,6 +760,12 @@ int rw_process(const rw_job_t *job, const rw_recipe_t *recipe, char *err)
                 if (fread(ob, 1, w, in) != w) { strcpy(err, "the raw data ends early - is the file complete?"); goto done; }
                 arw_decode_row(ob, w, codes);
                 for (x = 0; x < w; x++) lin[x] = a.lin[codes[x]];
+                if (pre)
+                {
+                    unsigned long tm = rw_ms();
+                    if (!rw_mexp_row(&mx, lin, w, a.black, a.white, err)) goto done;
+                    t_mexp += rw_ms() - tm;
+                }
                 pack_row(frow(&fr, loaded), lin, w);
                 loaded++;
             }
@@ -734,7 +775,9 @@ int rw_process(const rw_job_t *job, const rw_recipe_t *recipe, char *err)
                 bend_row(&fr, cc[i], r.segs.layout, r.segs.size, i, y, job->frame, ob_x);
             t_bend += rw_ms() - t;
             rw_stage = RW_STAGE_WRITE;
-            ok = out_row(&o, y, frow(&fr, y), origring + (unsigned long)(y % RING_ROWS) * w, err);
+            bent = frow(&fr, y);
+            if (post && !(bent = mexp_over(&mx, bent, overrow, overlin, &a, err))) goto done;
+            ok = out_row(&o, y, bent, origring + (unsigned long)(y % RING_ROWS) * w, err);
             if ((y & 63) == 0) prog_rows_done(y);
         }
         if (!ok) goto done;
@@ -756,6 +799,7 @@ int rw_process(const rw_job_t *job, const rw_recipe_t *recipe, char *err)
             if (fread(rowbuf, 1, w, in) != w) { strcpy(err, "the raw data ends early - is the file complete?"); goto done; }
             arw_decode_row(rowbuf, w, codes);
             for (x = 0; x < w; x++) lin[x] = a.lin[codes[x]];
+            if (pre && !rw_mexp_row(&mx, lin, w, a.black, a.white, err)) goto done;
             pack_row(frow(&fr, y), lin, w);
             if ((y & 63) == 0) prog_rows_done(y);
         }
@@ -819,7 +863,9 @@ int rw_process(const rw_job_t *job, const rw_recipe_t *recipe, char *err)
         for (y = 0; y < h; y++)
         {
             if (fread(rowbuf, 1, w, in) != w) { strcpy(err, "the raw data ends early"); goto done; }
-            if (!out_row(&o, y, frow(&fr, y), rowbuf, err)) goto done;
+            bent = frow(&fr, y);
+            if (post && !(bent = mexp_over(&mx, bent, overrow, overlin, &a, err))) goto done;
+            if (!out_row(&o, y, bent, rowbuf, err)) goto done;
             if ((y & 63) == 0) prog_rows_done(y);
         }
     }
@@ -829,6 +875,7 @@ int rw_process(const rw_job_t *job, const rw_recipe_t *recipe, char *err)
         if (!out_finish(&o, err)) goto done;
         rw_log("time: read %lu ms, matrix %lu ms, ARW encode+write %lu ms, develop+JPEG %lu ms, finish %lu ms",
                t_read, t_bend, t_arw, t_dev, rw_ms() - t);
+        if (mx.n) rw_log("time: multiple exposure blend %lu ms (inside the read)", t_mexp);
     }
 
     if (job->out_bnd)
@@ -847,6 +894,7 @@ int rw_process(const rw_job_t *job, const rw_recipe_t *recipe, char *err)
 done:
     bendx_set_service(0);
     out_free(&o);
+    rw_mexp_close(&mx);
     if (in) fclose(in);
     if (rc != 0)
     {
@@ -858,6 +906,6 @@ done:
     }
     for (i = 0; i < BEND_SEG_MAX; i++) free(cc[i]);
     free(fr.base); free(origring); free(rowbuf); free(codes); free(lin);
-    free(scratch); free(jpg_env); free(rom_env);
+    free(scratch); free(jpg_env); free(rom_env); free(overrow); free(overlin);
     return rc;
 }

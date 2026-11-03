@@ -16,6 +16,7 @@ import android.widget.FrameLayout;
 
 import java.io.File;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -26,8 +27,11 @@ import java.util.List;
  * data goes through the same bend matrix and experimental chain CHDK_Rewired runs inside a PowerShot's capture path.
  * The camera's own file is never touched; the bent raw, a developed JPEG and the recipe go into REWIRED/ (see {@link Card}).
  *
+ * Multiple exposure (the MULTI row) is CHDK_Rewired's: two to nine shots blended into one, with the ones taken so far
+ * held over the live view as a ghost to line the next one up against. See {@link Ghost} and native/mexp.h.
+ *
  * Keys - on every body Recipe Lab lists them for:
- *   UP / DOWN       row: matrix, scope, chain, preset
+ *   UP / DOWN       row: matrix, scope, chain, multi, preset
  *   LEFT / RIGHT    field in the row (on the matrix, which output bit)
  *   wheel / dial    change the field (on the matrix, patch a new source into the bit)
  *   centre          the row's action: matrix reroll, scope mutate, chain lock, preset load / save
@@ -67,6 +71,23 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
     private int presetIdx;
     private List<File> presetFiles;
 
+    // multiple exposure settings, the MULTI row
+    private boolean mexpOn, mexpBendEach = true;
+    private int mexpMode = Ghost.AVERAGE, mexpShots = 2, ghostIdx = 2, screen = PatchView.SCREEN_LCD;
+    static final int[] GHOST_ALPHA = { 0, 64, 128, 192 };
+    static final String[] GHOST_NAMES = { "OFF", "25%", "50%", "75%" };
+
+    // A sequence part way through. The mode, count and bend setting are latched when it starts, as CHDK_Rewired's
+    // mexp_begin() latches them: changing them half way would finish a composite under rules it was not begun with.
+    private final List<File> seqParts = new ArrayList<File>();     // the earlier exposures, in the order taken
+    private final List<File> seqTemp = new ArrayList<File>();      // bent ARWs kept only for the composite
+    private int seqTarget, seqMode;
+    private boolean seqBendEach;
+    private Ghost ghost;
+
+    // what a bend is for
+    static final int SHOT_SINGLE = 0, SHOT_EXPOSURE = 1, SHOT_LAST = 2;
+
     // a shot in flight
     private boolean busy, waiting, swallowUp;
     private File before;
@@ -84,6 +105,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         allowBus = prefs.getBoolean("allowBus", false);
         saveArw = prefs.getBoolean("saveArw", true);
         frame = prefs.getInt("frame", 0);
+        mexpOn = prefs.getBoolean("mexpOn", false);
+        mexpBendEach = prefs.getBoolean("mexpBendEach", true);
+        mexpMode = clamp(prefs.getInt("mexpMode", Ghost.AVERAGE), 0, Ghost.MODES - 1);
+        mexpShots = clamp(prefs.getInt("mexpShots", 2), 2, 9);
+        ghostIdx = clamp(prefs.getInt("ghost", 2), 0, GHOST_ALPHA.length - 1);
+        screen = clamp(prefs.getInt("screen", PatchView.SCREEN_LCD), 0, PatchView.SCREEN_NAMES.length - 1);
 
         FrameLayout root = new FrameLayout(this);
         SurfaceView sv = new SurfaceView(this);
@@ -173,8 +200,12 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
 
     private void save() {
         prefs.edit().putString("recipe", toHex(recipe)).putInt("depth", depth).putBoolean("allowBus", allowBus).putBoolean("saveArw", saveArw)
-                .putInt("frame", frame).commit();
+                .putInt("frame", frame).putBoolean("mexpOn", mexpOn).putBoolean("mexpBendEach", mexpBendEach)
+                .putInt("mexpMode", mexpMode).putInt("mexpShots", mexpShots).putInt("ghost", ghostIdx).putInt("screen", screen)
+                .commit();
     }
+
+    private static int clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
     private static File card() {
         try {
@@ -218,20 +249,39 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 "CHAIN", d[Native.D_BENDX_ON],
                 "LOCKED", d[Native.D_CHAIN] };
 
+        boolean seq = inSequence();
+        view.fields[PatchView.ROW_MULTI] = new String[] {
+                "MULTI", mexpOn ? "on" : "off",
+                "BLEND", Ghost.MODE_NAMES[seq ? seqMode : mexpMode],
+                "SHOTS", String.valueOf(seq ? seqTarget : mexpShots),
+                "BEND", (seq ? seqBendEach : mexpBendEach) ? "each" : "composite",
+                "GHOST", GHOST_NAMES[ghostIdx],
+                "SCREEN", PatchView.SCREEN_NAMES[screen],
+                "NOW", seq ? "shot " + (seqParts.size() + 1) + " of " + seqTarget : mexpOn ? "shot 1 of " + mexpShots : "-" };
+
         view.fields[PatchView.ROW_PRESET] = new String[] { "PRESET", presetLabel(), "", "centre: " + presetAction() };
 
+        view.ghost = seq ? view.ghost : null;
+        view.ghostAlpha = GHOST_ALPHA[ghostIdx];
+        view.screen = screen;
         view.hint = hint();
         if (!busy && !waiting) {
-            view.status = "1".equals(d[Native.D_ACTIVE]) ? "" : "Straight through - turn the wheel on a bit, or press centre to reroll";
+            if (seq) view.status = "Multiple exposure: shot " + (seqParts.size() + 1) + " of " + seqTarget
+                    + (view.ghost == null && ghostIdx > 0 ? " (no ghost - its picture would not load)" : " - line it up");
+            else view.status = "1".equals(d[Native.D_ACTIVE]) ? "" : "Straight through - turn the wheel on a bit, or press centre to reroll";
         }
         view.invalidate();
     }
+
+    private boolean inSequence() { return !seqParts.isEmpty(); }
 
     private String hint() {
         switch (view.row) {
             case PatchView.ROW_MATRIX: return "wheel: patch a source   centre: reroll   trash: straight wire   shutter: shoot";
             case PatchView.ROW_SCOPE:  return "wheel: change   centre: mutate the matrix a little   trash: reset this region";
             case PatchView.ROW_CHAIN:  return "wheel: change   centre: lock and start another   trash: drop an effect";
+            case PatchView.ROW_MULTI:  return inSequence() ? "centre / trash: cancel the sequence (shots so far stay on the card)"
+                                                           : "wheel: change   BEND: bend each shot, or only the blended result";
             default:                   return "wheel: choose   centre: " + presetAction();
         }
     }
@@ -257,6 +307,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             case PatchView.ROW_MATRIX: return view.routes.length;
             case PatchView.ROW_SCOPE: return 8;
             case PatchView.ROW_CHAIN: return 5;
+            case PatchView.ROW_MULTI: return 6;         // NOW is shown, not set
             default: return 1;
         }
     }
@@ -289,6 +340,22 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                     case 3: edit(Native.OP_X_TINT, dir, 0); return;
                     default: edit(Native.OP_TOGGLE_BENDX, 0, 0); return;
                 }
+            case PatchView.ROW_MULTI:
+                switch (c) {
+                    case 0:
+                        mexpOn = !mexpOn;
+                        // Off part way through ends the sequence rather than freezing it, as CHDK_Rewired does.
+                        if (!mexpOn && inSequence()) cancelSequence("multiple exposure switched off");
+                        break;
+                    case 1: mexpMode = (mexpMode + dir + Ghost.MODES) % Ghost.MODES; break;
+                    case 2: mexpShots = clamp(mexpShots + dir, 2, 9); break;
+                    case 3: mexpBendEach = !mexpBendEach; break;
+                    case 4: ghostIdx = (ghostIdx + dir + GHOST_ALPHA.length) % GHOST_ALPHA.length; break;
+                    default: screen = (screen + 1) % PatchView.SCREEN_NAMES.length; break;
+                }
+                refresh();
+                if (inSequence() && c >= 1 && c <= 3) status("Changes to BLEND, SHOTS and BEND apply from the next sequence");
+                return;
             default:
                 int n = presetCount() + 1;
                 presetIdx = ((presetIdx + dir) % n + n) % n;
@@ -303,6 +370,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             case PatchView.ROW_MATRIX: edit(Native.OP_RANDOM, seed(), depth | (allowBus ? Native.ALLOW_BUS : 0)); return;
             case PatchView.ROW_SCOPE: edit(Native.OP_MUTATE, seed(), allowBus ? Native.ALLOW_BUS : 0); return;
             case PatchView.ROW_CHAIN: edit(Native.OP_X_LOCK, 0, 0); return;
+            case PatchView.ROW_MULTI: if (inSequence()) cancelSequence("cancelled"); return;
             default: presetGo();
         }
     }
@@ -312,6 +380,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
             case PatchView.ROW_MATRIX: edit(Native.OP_ROUTE_STRAIGHT, view.routes.length - 1 - view.col, 0); return;
             case PatchView.ROW_SCOPE: edit(Native.OP_RESET_MATRIX, 0, 0); return;
             case PatchView.ROW_CHAIN: edit(Native.OP_X_DROP, 0, 0); return;
+            case PatchView.ROW_MULTI: if (inSequence()) cancelSequence("cancelled"); return;
             default:
         }
     }
@@ -412,7 +481,7 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
                 log("raw arrived: " + f.getPath() + ", " + f.length() + " bytes, after "
                         + (System.currentTimeMillis() - waitStart) + " ms");
                 try { if (camera != null) camera.startPreview(); } catch (Throwable t) { log("startPreview: " + t); }
-                bend(f);
+                arrived(f);
                 return;
             }
             lastSize = isNew ? f.length() : -1;
@@ -426,33 +495,120 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
     };
 
-    private void bend(final File in) {
+    /**
+     * A raw has landed. Outside a multiple exposure it is bent on its own. Inside one, every exposure but the last is
+     * either bent and kept for the composite (BEND each) or only noted (BEND composite); the last is bent and blended
+     * with the earlier ones in a single pass, and that composite is the picture.
+     */
+    private void arrived(File f) {
+        if (!mexpOn) { bend(f, SHOT_SINGLE); return; }
+        if (!inSequence()) {
+            seqTarget = mexpShots;
+            seqMode = mexpMode;
+            seqBendEach = mexpBendEach;
+            ghost = new Ghost(seqMode);
+            log("multiple exposure begins: " + seqTarget + " shots, " + Ghost.MODE_NAMES[seqMode]
+                    + ", bend " + (seqBendEach ? "each" : "composite"));
+        }
+        int k = seqParts.size() + 1;
+        log("multiple exposure shot " + k + " of " + seqTarget + ": " + f.getName());
+        if (k >= seqTarget) { bend(f, SHOT_LAST); return; }
+        if (seqBendEach) { bend(f, SHOT_EXPOSURE); return; }
+        // Composite only: the camera's raw is the exposure, and its JPEG the ghost.
+        seqParts.add(f);
+        addGhost(sibling(f, ".JPG"), 8, 6);
+        refresh();
+    }
+
+    private static File sibling(File f, String ext) {
+        String n = f.getName();
+        int dot = n.lastIndexOf('.');
+        return new File(f.getParentFile(), (dot < 0 ? n : n.substring(0, dot)) + ext);
+    }
+
+    /**
+     * Fold a picture into the ghost. The camera may still be writing its JPEG when the raw is done, so a picture that
+     * is not there yet is tried again, a few times, half a second apart.
+     */
+    private void addGhost(final File jpg, final int sample, final int tries) {
+        if (ghost == null || !inSequence()) return;
+        Bitmap bm = null;
+        try {
+            if (jpg.length() > 0) {
+                BitmapFactory.Options o = new BitmapFactory.Options();
+                o.inSampleSize = sample;
+                bm = BitmapFactory.decodeFile(jpg.getPath(), o);
+            }
+        } catch (Throwable t) { log("ghost decode: " + t); }
+        if (bm == null) {
+            if (tries > 1) handler.postDelayed(new Runnable() { public void run() { addGhost(jpg, sample, tries - 1); } }, 500);
+            else { log("ghost: " + jpg.getName() + " would not load"); refresh(); }
+            return;
+        }
+        try {
+            Bitmap s = Bitmap.createScaledBitmap(bm, Ghost.W, Ghost.H, true);
+            if (s != bm) bm.recycle();
+            int[] px = new int[Ghost.W * Ghost.H];
+            s.getPixels(px, 0, Ghost.W, 0, 0, Ghost.W, Ghost.H);
+            s.recycle();
+            ghost.add(px);
+            Bitmap g = Bitmap.createBitmap(ghost.composite(), Ghost.W, Ghost.H, Bitmap.Config.ARGB_8888);
+            if (view.ghost != null) view.ghost.recycle();
+            view.ghost = g;
+            log("ghost: " + ghost.count() + " exposure(s) from " + jpg.getName());
+        } catch (Throwable t) { log("ghost: " + t); }
+        refresh();
+    }
+
+    /** End a sequence without a composite. The exposures already taken stay on the card; only the bent ARWs kept
+     * just to build the composite (SAVE JPG) go. */
+    private void cancelSequence(String why) {
+        log("multiple exposure " + why + " after " + seqParts.size() + " of " + seqTarget);
+        endSequence();
+        refresh();
+        status("Multiple exposure " + why);
+    }
+
+    private void endSequence() {
+        for (File f : seqTemp) f.delete();
+        seqTemp.clear();
+        seqParts.clear();
+        ghost = null;
+        if (view.ghost != null) { view.ghost.recycle(); view.ghost = null; }
+    }
+
+    private void bend(final File in, final int kind) {
         final File dir = new File(card(), Card.OUT_DIR);
         dir.mkdirs();
         final String base = Card.freeBase(dir, Card.outBase(in.getName()));
         final byte[] rec = recipe;
         final int seed = seed(), fr = ++frame;
-        final boolean arw = saveArw;
+        // An exposure bent for a composite needs its bent raw: that is what the composite is made from.
+        final boolean arw = saveArw || kind == SHOT_EXPOSURE;
+        final String[] earlier = new String[kind == SHOT_LAST ? seqParts.size() : 0];
+        for (int i = 0; i < earlier.length; i++) earlier[i] = seqParts.get(i).getPath();
+        final int mode = seqMode;
+        final boolean after = seqBendEach;
         busy = true;
         save();
         view.progress = 0;
-        status("Bending " + in.getName());
+        status(kind == SHOT_LAST ? "Blending " + (earlier.length + 1) + " exposures" : "Bending " + in.getName());
         handler.post(progressTick);
         // An explicit 1 MB stack: Dalvik's default for a new thread is small, and this one runs a lot of native code.
         new Thread(null, new Runnable() {
             public void run() {
                 String err;
                 try {
-                    int rc = Native.process(in.getPath(), arw ? new File(dir, base + ".ARW").getPath() : null,
+                    int rc = Native.processMulti(in.getPath(), arw ? new File(dir, base + ".ARW").getPath() : null,
                             new File(dir, base + ".JPG").getPath(), new File(dir, base + ".BND").getPath(),
-                            ROM_PATH, rec, seed, fr);
+                            ROM_PATH, rec, seed, fr, earlier, mode, after);
                     err = rc == 0 ? null : Native.lastError();
                 } catch (Throwable t) {
                     err = String.valueOf(t);
                     log("process threw: " + t);
                 }
                 final String e = err;
-                handler.post(new Runnable() { public void run() { bent(dir, base, e); } });
+                handler.post(new Runnable() { public void run() { bent(dir, base, e, kind); } });
             }
         }, "bend", 1 << 20).start();
     }
@@ -469,17 +625,36 @@ public class MainActivity extends Activity implements SurfaceHolder.Callback {
         }
     };
 
-    private void bent(File dir, String base, String err) {
+    private void bent(File dir, String base, String err, int kind) {
         busy = false;
         view.progress = -1;
-        if (err != null) { status("Bend failed: " + err); return; }
+        if (err != null) {
+            if (kind != SHOT_SINGLE && inSequence()) {
+                log("multiple exposure ended by a failed bend");
+                endSequence();
+                refresh();
+                status("Bend failed, so the multiple exposure is cancelled: " + err);
+            } else status("Bend failed: " + err);
+            return;
+        }
+        if (kind == SHOT_EXPOSURE) {
+            // Kept for the composite and folded into the ghost; no review, so the next shot can be lined up at once.
+            File a = new File(dir, base + ".ARW");
+            seqParts.add(a);
+            if (!saveArw) seqTemp.add(a);
+            addGhost(new File(dir, base + ".JPG"), 4, 1);
+            return;
+        }
+        int shots = seqParts.size() + 1;
+        if (kind == SHOT_LAST) endSequence();
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inSampleSize = 4;                         // 3012 wide down to the LCD's neighbourhood, in little memory
         Bitmap bm = null;
         try { bm = BitmapFactory.decodeFile(new File(dir, base + ".JPG").getPath(), o); } catch (Throwable t) { log("review decode: " + t); }
         log("review " + (bm == null ? "not shown (decode failed)" : "shown " + bm.getWidth() + "x" + bm.getHeight()));
         view.review = bm;
-        view.reviewCaption = Card.OUT_DIR + "/" + base + (saveArw ? ".JPG + .ARW" : ".JPG") + "   centre / MENU / shutter: back";
+        view.reviewCaption = (kind == SHOT_LAST ? shots + " exposures, " + Ghost.MODE_NAMES[seqMode] + ": " : "")
+                + Card.OUT_DIR + "/" + base + (saveArw ? ".JPG + .ARW" : ".JPG") + "   centre / MENU / shutter: back";
         status("");
         refresh();
     }

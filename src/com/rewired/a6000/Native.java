@@ -46,6 +46,12 @@ final class Native {
     /** 0 on success; otherwise {@link #lastError()} says why. Blocks: run it off the UI thread. */
     static native int process(String inArw, String outArw, String outJpg, String outBnd, String romPath,
                               byte[] recipe, int seed, int frame);
+    /**
+     * The last exposure of a multiple exposure: {@link #process}, with the earlier exposures blended in. Without
+     * afterBend they are camera raws, blended before the bend; with it, earlier bent ARWs, laid over this one bent.
+     */
+    static native int processMulti(String inArw, String outArw, String outJpg, String outBnd, String romPath,
+                                   byte[] recipe, int seed, int frame, String[] earlier, int mode, boolean afterBend);
     static native String lastError();
     /** REWIRED/LOG.TXT: every line opened, written and closed alone, so a crash loses nothing before it */
     static native void setLog(String path);

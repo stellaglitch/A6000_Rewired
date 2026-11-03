@@ -24,16 +24,32 @@ Use **RAW+JPEG**. Never use RAW alone: on the a6000 a shutter fired from an app 
 
 | key | |
 |---|---|
-| up / down | row: **matrix**, **scope**, **chain**, **preset** |
+| up / down | row: **matrix**, **scope**, **chain**, **multi**, **preset** |
 | left / right | field in the row (on the matrix, the output bit) |
 | wheel / dial | change the field (on the matrix, patch a source into the bit) |
-| centre | matrix: reroll · scope: mutate · chain: lock this effect and start another · preset: load or save |
-| trash | matrix: straight wire · scope: reset the region's matrix · chain: drop an effect |
+| centre | matrix: reroll · scope: mutate · chain: lock this effect and start another · multi: cancel the sequence · preset: load or save |
+| trash | matrix: straight wire · scope: reset the region's matrix · chain: drop an effect · multi: cancel the sequence |
 | Fn | hide or show the panel |
 | shutter | shoot, then bend. A bar shows progress, then the bent picture appears. Centre, MENU or a half-press returns |
 | MENU | leave |
 
 The live view is the camera's own and is not bent. You see the bend in the review after each shot. CHDK_Rewired's live preview depends on reading the PowerShot's viewport buffer, and this app has no equivalent yet.
+
+### Multiple exposure
+
+This is CHDK_Rewired's double exposure. Two to nine shots are blended into one picture, and the shots taken so far stay over the live view as a see-through **ghost**, so you can line up the next one. Turn it on in the **MULTI** row:
+
+| field | |
+|---|---|
+| MULTI | on / off. Turning it off during a sequence cancels the sequence |
+| BLEND | **ADD** sums the light, so highlights build up and clip. **LIGHTEN** keeps the brighter pixel (lights on black). **DARKEN** keeps the darker one. **AVERAGE** is the classic ghost |
+| SHOTS | 2–9 |
+| BEND | **each**: every shot is bent as it is taken, then the bent shots are blended. **composite**: the shots are blended first and the blend is bent once |
+| GHOST | how strongly the shots so far show over the live view: OFF, 25%, 50%, 75% |
+| SCREEN | **LCD** or **EVF**, whichever you are looking through. The LCD is 16:9 and the finder 4:3, so the ghost and review are drawn to the right shape for each |
+| NOW | which shot is next |
+
+The blend uses the raw sensor values, so ADD and AVERAGE behave as they would on film. The ghost is a quick preview built from JPEGs, so it is close to the result but not exact. With BEND *each*, every shot except the last is saved as its own bent picture, and the last shot gives the composite. With BEND *composite*, the shots in between are only the camera's own files in `DCIM`. A sequence uses the BLEND, SHOTS and BEND settings it started with. Changing them during a sequence takes effect from the next one.
 
 ## The desktop tool
 
@@ -44,6 +60,8 @@ rewire IN.ARW -o OUT.ARW -j OUT.JPG -r 7                    random matrix, seed 
 rewire IN.ARW -x "Melt:12:10" -x "Lock loss:8:6" -j OUT.JPG  an effect chain
 rewire IN.ARW -p BEND07.BND -s Quarters -j OUT.JPG           a PowerShot preset, segmented
 rewire IN.ARW -p RW01542.JPG -j AGAIN.JPG                    the recipe out of a tagged picture
+rewire B.ARW -e A.ARW -M lighten -r 7 -j OUT.JPG             double exposure, bent after blending
+rewire B.ARW -e RW_A.ARW -M add -A -r 7 -j OUT.JPG           B bent, then laid over an already bent A
 rewire --list | --info IN.ARW | --selftest IN.ARW
 ```
 
@@ -68,6 +86,7 @@ native/engine/   CHDK_Rewired's bend.c / bendx.c / bend.h / bendx.h, verbatim; c
 native/arw.c     ARW: TIFF walk, SR2Private decryption (WB, black, white), the cRAW block codec
 native/pipeline.c  read -> bend -> bendx -> re-encode + develop + preview/thumbnail replacement
 native/jpegenc.c streaming baseline JPEG encoder (8 rows in memory)
+native/mexp.c    multiple exposure: the four blends, and the earlier exposures read row by row beside the current one
 native/recipe.c  BSH1 records, BND1 presets, @rewired_optics tags - byte-compatible with CHDK_Rewired
 jni/             JNI bridge, ndk-build files
 src/             the app: MainActivity (camera, keys, shot flow), PatchView (screen), Card (files), Native

@@ -21,6 +21,11 @@
 //   -l LOGFILE        append the pipeline's log, as the camera writes REWIRED/LOG.TXT
 //   -F                hold the whole frame even for a matrix-only bend (tests)
 //   -w PRESET.BND     save the recipe as a preset and exit
+//   -e EARLIER.ARW    multiple exposure: an earlier exposure to blend with IN
+//                     (repeat, up to 8); IN is the last and gives the header
+//   -M MODE           its blend: add, lighten, darken, average (default)
+//   -A                blend after the bend (the earlier files are bent ARWs)
+//   --mexp-selftest   check the four blends against their definitions
 //   --list            list the effects and layouts
 //   --info            print what is in the ARW
 //   --selftest        check the codec against the file: decode, re-encode,
@@ -34,6 +39,7 @@
 #include "../native/pipeline.h"
 #include "../native/arw.h"
 #include "../native/log.h"
+#include "../native/mexp.h"
 
 static int name_eq(const char *a, const char *b)
 {
@@ -191,6 +197,53 @@ static int selftest(const char *path)
     return fails ? 1 : 0;
 }
 
+// The four blends against what they are meant to be, on every pair and a few
+// triples of a spread of values, black 128 and white 3840 as the a6000's.
+static int mexp_selftest(void)
+{
+    static const unsigned short vals[] = { 0, 100, 128, 129, 500, 1000, 2047, 3000, 3839, 3840, 4095 };
+    const unsigned nv = sizeof(vals) / sizeof(vals[0]), black = 128, white = 3840;
+    unsigned i, j, k, fails = 0;
+    int mode;
+
+    for (mode = 0; mode < RW_MEXP_MODES; mode++)
+        for (i = 0; i < nv; i++)
+            for (j = 0; j < nv; j++)
+                for (k = 0; k <= nv; k++)
+                {
+                    // k == nv: a pair; otherwise a triple
+                    unsigned short r0[1] = { vals[i] }, r1[1] = { vals[j] }, r2[1] = { k < nv ? vals[k] : 0 }, out[1];
+                    const unsigned short *rows[3] = { r0, r1, r2 };
+                    int n = k < nv ? 3 : 2, t;
+                    unsigned want, v[3] = { vals[i], vals[j], k < nv ? vals[k] : 0 };
+
+                    switch (mode)
+                    {
+                    case RW_MEXP_LIGHTEN: want = v[0]; for (t = 1; t < n; t++) if (v[t] > want) want = v[t]; break;
+                    case RW_MEXP_DARKEN:  want = v[0]; for (t = 1; t < n; t++) if (v[t] < want) want = v[t]; break;
+                    case RW_MEXP_ADD:
+                        want = black;
+                        for (t = 0; t < n; t++) want += v[t] > black ? v[t] - black : 0;
+                        if (want > white) want = white;
+                        break;
+                    default:
+                        want = 0;
+                        for (t = 0; t < n; t++) want += v[t];
+                        want = (want + n / 2) / n;
+                    }
+                    // dst aliasing rows[0] is how the pipeline calls it
+                    rw_mexp_blend(mode, r0, rows, n, 1, black, white);
+                    out[0] = r0[0];
+                    if (out[0] != want)
+                    {
+                        if (fails++ < 5) printf("FAIL %s %u %u %u -> %u, want %u\n", rw_mexp_name(mode),
+                                                v[0], v[1], v[2], out[0], want);
+                    }
+                }
+    printf(fails ? "MEXP SELFTEST FAILED (%u)\n" : "MEXP SELFTEST OK\n", fails);
+    return fails ? 1 : 0;
+}
+
 //-------------------------------------------------------------------
 
 int main(int argc, char **argv)
@@ -207,6 +260,7 @@ int main(int argc, char **argv)
     job.jpeg_quality = 92;
     job.seed = 1;
     job.frame = 1;
+    job.mexp_mode = RW_MEXP_AVERAGE;
 
     for (i = 1; i < argc; i++)
     {
@@ -214,6 +268,20 @@ int main(int argc, char **argv)
         if (!strcmp(a, "--list")) { list(); return 0; }
         else if (!strcmp(a, "--info") && v) return info(v);
         else if (!strcmp(a, "--selftest") && v) return selftest(v);
+        else if (!strcmp(a, "--mexp-selftest")) return mexp_selftest();
+        else if (!strcmp(a, "-e") && v)
+        {
+            if (job.mexp_n >= RW_MEXP_MAX - 1) { printf("a sequence holds %d exposures at most\n", RW_MEXP_MAX); return 1; }
+            job.mexp_in[job.mexp_n++] = v; i++;
+        }
+        else if (!strcmp(a, "-M") && v)
+        {
+            int m;
+            for (m = 0; m < RW_MEXP_MODES && !name_eq(v, rw_mexp_name(m)); m++) {}
+            if (m == RW_MEXP_MODES) { printf("no blend called \"%s\": add, lighten, darken, average\n", v); return 1; }
+            job.mexp_mode = m; i++;
+        }
+        else if (!strcmp(a, "-A")) job.mexp_after_bend = 1;
         else if (!strcmp(a, "-o") && v) { job.out_arw = v; i++; }
         else if (!strcmp(a, "-j") && v) { job.out_jpg = v; i++; }
         else if (!strcmp(a, "-b") && v) { job.out_bnd = v; i++; }

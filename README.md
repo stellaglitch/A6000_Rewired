@@ -1,6 +1,6 @@
-# Soft Bending For The Î±6000
+# Soft Bending For The A6000
 
-[CHDK_Rewired](https://github.com/lr-m/CHDK_Rewired)'s circuit bending, made as an app for the Sony Î±6000.
+[CHDK_Rewired](https://github.com/lr-m/CHDK_Rewired)'s circuit bending, made as an app for the Sony A6000.
 
 On a PowerShot, CHDK_Rewired rewires the sensor's data bus inside the camera's capture path, before Canon develops the picture. The a6000's imaging pipeline cannot be patched that way. What a PlayMemories app can do is read the raw the camera has just written. So this app runs CHDK_Rewired's own bend engine (`bend.c` and `bendx.c`, unchanged) one step later, on the ARW's sensor data:
 
